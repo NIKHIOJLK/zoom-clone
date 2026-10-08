@@ -1,69 +1,133 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { ArrowUp, CalendarDays, Plus, Video } from "lucide-react";
+import { useEffect, useState } from "react";
+import TopNav from "@/components/TopNav";
+import ActionTile from "@/components/home/ActionTile";
+import RecentMeetings from "@/components/home/RecentMeetings";
+import UpcomingCard from "@/components/home/UpcomingCard";
+import JoinMeetingModal from "@/components/JoinMeetingModal";
+import ScheduleMeetingModal from "@/components/ScheduleMeetingModal";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { useStartMeeting } from "@/hooks/useStartMeeting";
+import { useNowSeconds } from "@/hooks/useBrowserValue";
+import { api, ApiError, type Meeting } from "@/lib/api";
+
+export default function HomePage() {
+  const user = useCurrentUser();
+  const { newMeeting, startMeeting, busy, error, clearError } = useStartMeeting(user);
+  const [upcoming, setUpcoming] = useState<Meeting[] | null>(null);
+  const [recent, setRecent] = useState<Meeting[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [modal, setModal] = useState<"join" | "schedule" | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const [reloadKey, setReloadKey] = useState(0);
+  const load = () => setReloadKey((k) => k + 1);
+
+  // fetch both lists on mount and whenever load() is called
+  useEffect(() => {
+    let ignore = false;
+    Promise.all([api.upcoming(), api.recent()])
+      .then(([u, r]) => {
+        if (ignore) return;
+        setUpcoming(u);
+        setRecent(r);
+        setLoadError(null);
+      })
+      .catch((e) => {
+        if (ignore) return;
+        setLoadError(e instanceof ApiError ? e.message : "Couldn't load your meetings.");
+        setUpcoming([]);
+        setRecent([]);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [reloadKey]);
+
+  useEffect(() => {
+    if (!notice) return;
+    const t = setTimeout(() => setNotice(null), 2500);
+    return () => clearTimeout(t);
+  }, [notice]);
+
+  async function deleteMeeting(code: string) {
+    if (!confirm("Delete this meeting? Anyone with the invite won't be able to join.")) return;
+    try {
+      await api.deleteMeeting(code);
+      setUpcoming((list) => list?.filter((m) => m.meeting_code !== code) ?? null);
+      setNotice("Meeting deleted");
+    } catch (e) {
+      setNotice(e instanceof ApiError ? e.message : "Couldn't delete the meeting.");
+    }
+  }
+
+  // day-of-month on the Schedule tile; computed in the browser so it's never the build date
+  const nowSec = useNowSeconds();
+  const today = nowSec ? String(new Date(nowSec * 1000).getDate()) : undefined;
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert h-5 w-[100px]"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the{" "}
-            <code className="rounded bg-black/[.06] px-1.5 py-0.5 font-mono text-[0.9em] dark:bg-white/[.08]">
-              page.tsx
-            </code>{" "}
-            file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert h-[14px] w-4"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={14}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+    <>
+      <TopNav />
+      <main className="flex-1 bg-white">
+        {loadError && (
+          <div role="alert" className="border-b border-[#fecdca] bg-[#fef3f2] px-5 py-2.5 text-center text-sm text-[#b42318]">
+            {loadError}{" "}
+            <button onClick={load} className="font-bold underline">
+              Retry
+            </button>
+          </div>
+        )}
+
+        <div className="mx-auto grid max-w-[1080px] gap-10 px-4 py-8 sm:px-8 md:py-14 lg:grid-cols-[1fr_440px] lg:gap-14">
+          <div className="flex flex-col items-center gap-12">
+            <div className="grid grid-cols-2 gap-x-10 gap-y-8 pt-2 sm:gap-x-14 lg:pt-10">
+              <ActionTile label="New meeting" icon={Video} color="orange" onClick={newMeeting} disabled={busy || !user} />
+              <ActionTile label="Join" icon={Plus} color="blue" onClick={() => setModal("join")} />
+              <ActionTile label="Schedule" icon={CalendarDays} color="blue" onClick={() => setModal("schedule")} badge={today} />
+              <ActionTile label="Share screen" icon={ArrowUp} color="blue" onClick={() => setModal("join")} />
+            </div>
+            {busy && <p className="-mt-6 text-sm text-zoom-muted">Starting your meeting…</p>}
+            {error && (
+              <p role="alert" className="-mt-6 text-sm text-zoom-red">
+                {error}{" "}
+                <button className="underline" onClick={clearError}>
+                  Dismiss
+                </button>
+              </p>
+            )}
+            <div className="w-full max-w-[520px]">
+              <RecentMeetings meetings={recent} />
+            </div>
+          </div>
+
+          <UpcomingCard
+            meetings={upcoming}
+            onStart={startMeeting}
+            onDelete={deleteMeeting}
+            onSchedule={() => setModal("schedule")}
+            busy={busy}
+          />
         </div>
       </main>
-    </div>
+
+      {modal === "join" && <JoinMeetingModal user={user} onClose={() => setModal(null)} />}
+      {modal === "schedule" && (
+        <ScheduleMeetingModal
+          user={user}
+          onClose={() => setModal(null)}
+          onScheduled={() => {
+            load();
+          }}
+        />
+      )}
+
+      {notice && (
+        <div role="status" className="animate-pop fixed bottom-6 left-1/2 z-[60] -translate-x-1/2 rounded-lg bg-zoom-text px-4 py-2.5 text-sm text-white shadow-lg">
+          {notice}
+        </div>
+      )}
+    </>
   );
 }
