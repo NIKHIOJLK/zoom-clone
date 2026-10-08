@@ -1,6 +1,14 @@
+# Python
 venv/
+__pycache__/
+*.pyc
+*.db
+
+# Node / Next.js
 node_modules/
 .next/
-__pycache__/
-*.db
+next-env.d.ts
+
+# env files
 .env
+.env.local
