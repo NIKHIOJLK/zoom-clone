@@ -2,8 +2,8 @@
 
 A web clone of Zoom's meeting workflows. You can start an instant meeting, join by meeting ID or invite link, schedule meetings, chat in a meeting, and use host controls. The UI follows Zoom's Home screen, Join and Schedule dialogs, and the dark meeting room.
 
-**Live app:** _add your Vercel URL here_  
-**API docs:** _add your Render URL here_/docs
+**Live app:** https://zoom-clone-sandy-five.vercel.app  
+**API docs:** https://ryukishin12.pythonanywhere.com/docs
 
 ## Tech stack
 
@@ -126,13 +126,13 @@ The frontend calls `http://localhost:8000` by default. To change it, set `NEXT_P
 
 ## Deployment
 
-1. **Backend on Render:** New → Web Service → this repo.
-   - Root directory: `backend`
-   - Build command: `pip install -r requirements.txt`
-   - Start command: `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-   - Env: `FRONTEND_URL` = your Vercel URL (you can add it after step 2)
-2. **Frontend on Vercel:** Import the repo with root directory `frontend`, and set env `NEXT_PUBLIC_API_URL` = your Render URL.
-3. Put the Vercel URL into Render's `FRONTEND_URL`, then redeploy the backend.
+## Deployment
+
+- **Frontend: Vercel.** Root directory `frontend`, env `NEXT_PUBLIC_API_URL=https://ryukishin12.pythonanywhere.com`. It redeploys on every push to `main`.
+- **Backend: PythonAnywhere** (ASGI/uvicorn). Clone the repo, create a virtualenv, `pip install -r backend/requirements.txt`, then:
+  `pa website create --domain <user>.pythonanywhere.com --command "<venv>/bin/uvicorn --app-dir ~/zoom-clone/backend --uds \${DOMAIN_SOCKET} app.main:app"`
+  Settings go in `backend/.env` (`FRONTEND_URL=...`). To update: `git pull`, then `pa website reload --domain <user>.pythonanywhere.com`.
+
 
 ## Assumptions and limitations
 
@@ -140,6 +140,5 @@ The frontend calls `http://localhost:8000` by default. To change it, set `NEXT_P
 - **Host actions** are authorized by checking that the acting participant has the `host` role in that meeting. Without real auth this is trust-based, which is fine for a demo.
 - **Video and audio are local only.** Each person sees their own camera, and others appear as avatar tiles with their live mute and video status. Streaming media between browsers would need WebRTC plus a signalling server (or an SFU), which is outside the scope of this assignment.
 - **Real-time updates use polling** (every 2.5 seconds) rather than WebSockets. That's simple and reliable on free hosting.
-- **SQLite on Render's free tier** is reset when the service restarts. The app re-seeds itself on startup, so demo data is always there. For production, use a persistent disk or Postgres (only `DATABASE_URL` changes).
 - Closing the tab without clicking Leave leaves that participant listed until the host removes them or ends the meeting.
 - The UI recreates Zoom's layout, colours (Zoom blue `#0B5CFF`, orange `#FF742E`) and font (Lato), but uses a generic camera icon instead of Zoom's logo.
