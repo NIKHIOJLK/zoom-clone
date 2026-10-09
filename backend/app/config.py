@@ -1,5 +1,13 @@
-"""App settings, read from environment variables with local-dev defaults."""
+"""App settings, read from environment variables (or backend/.env) with local-dev defaults."""
 import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+BACKEND_DIR = Path(__file__).resolve().parent.parent
+
+# Optional backend/.env file (not committed). Real environment variables win over it.
+load_dotenv(BACKEND_DIR / ".env")
 
 # Where the Next.js app runs. Used to build invite links.
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000").rstrip("/")
@@ -11,4 +19,5 @@ CORS_ORIGINS = [
     if o.strip()
 ]
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./zoom.db")
+# Absolute path, so the DB lands in backend/ no matter which folder the server starts from.
+DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{BACKEND_DIR / 'zoom.db'}")
