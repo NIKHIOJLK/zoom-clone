@@ -23,10 +23,13 @@ import ToolbarButton from "./ToolbarButton";
 import VideoTile from "./VideoTile";
 import { CenteredMessage } from "../PreJoin";
 import { useLocalMedia } from "@/hooks/useLocalMedia";
+import { useMeetingSocket, type ServerEvent } from "@/hooks/useMeetingSocket";
+import { usePeers, type SignalData } from "@/hooks/usePeers";
 import { api, ApiError, type ChatMessage, type Meeting, type Participant } from "@/lib/api";
 import { clearSession, loadSession, type MeetingSession } from "@/lib/session";
 
-const POLL_MS = 2500;
+// Updates arrive over the WebSocket. Polling is only a fallback while the socket is reconnecting.
+const FALLBACK_POLL_MS = 5000;
 const REACTIONS = ["👏", "👍", "❤️", "😂", "😮", "🎉"];
 
 type Phase = "loading" | "in" | "left" | "removed" | "ended";
@@ -45,6 +48,7 @@ export default function MeetingRoom({ code }: { code: string }) {
   const [session] = useState<MeetingSession | null>(() => (typeof window === "undefined" ? null : loadSession(code)));
   const [meeting, setMeeting] = useState<Meeting | null>(null);
   const [participants, setParticipants] = useState<Participant[]>([]);
+  const [online, setOnline] = useState<number[]>([]); // participant ids with an open socket
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [seenMessages, setSeenMessages] = useState(0);
   const [phase, setPhase] = useState<Phase>("loading");
@@ -70,12 +74,28 @@ export default function MeetingRoom({ code }: { code: string }) {
     setTimeout(() => setToast(null), 2600);
   }, []);
 
+  // React to my own row in the participant list: the host may have muted me.
+  const setMicOn = media.setMicOn;
+  const applyMyState = useCallback(
+    (me: Participant) => {
+      if (me.is_muted && !hostMutedRef.current) {
+        hostMutedRef.current = true;
+        setMicOn((on) => {
+          if (on) flash("The host muted you");
+          return false;
+        });
+      }
+      if (!me.is_muted) hostMutedRef.current = false;
+    },
+    [flash, setMicOn],
+  );
+
   // 1. Who am I? No session for this meeting in this tab -> go to the join screen.
   useEffect(() => {
     if (!session) router.replace(`/join/${code}`);
   }, [session, code, router]);
 
-  // 2. Poll the server for participants, my own state, meeting status and new chat messages.
+  // 2. Fetch the full state once (on load, after a reconnect, or as a fallback while the socket is down).
   const poll = useCallback(async () => {
     if (!session) return;
     try {
@@ -93,28 +113,67 @@ export default function MeetingRoom({ code }: { code: string }) {
       }
       if (me.is_removed) return setPhase("removed");
       if (m.status === "ended" || me.left_at) return setPhase((p) => (p === "left" ? p : "ended"));
-      // the host muted me: turn my mic off locally
-      if (me.is_muted && !hostMutedRef.current) {
-        hostMutedRef.current = true;
-        media.setMicOn((on) => {
-          if (on) flash("The host muted you");
-          return false;
-        });
-      }
-      if (!me.is_muted) hostMutedRef.current = false;
+      applyMyState(me);
       setPhase((p) => (p === "loading" ? "in" : p));
     } catch (e) {
       if (e instanceof ApiError && e.status === 404) setPhase("ended");
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [code, session, flash]);
+  }, [code, session, applyMyState]);
 
+  // 3. Live updates pushed by the server over the meeting socket.
+  // (signals go to the WebRTC hook created below; a ref breaks the socket <-> peers cycle)
+  const signalRef = useRef<(from: number, data: SignalData) => void>(() => {});
+  const active = phase === "loading" || phase === "in";
+  const onEvent = (e: ServerEvent) => {
+    switch (e.type) {
+      case "participants": {
+        setParticipants(e.participants);
+        setOnline(e.online);
+        const me = e.participants.find((p) => p.id === meId);
+        if (me) applyMyState(me);
+        else poll(); // I'm not in the list any more: find out whether I was removed or the meeting ended
+        break;
+      }
+      case "message":
+        lastMessageId.current = Math.max(lastMessageId.current, e.message.id);
+        setMessages((prev) => (prev.some((x) => x.id === e.message.id) ? prev : [...prev, e.message]));
+        break;
+      case "removed":
+        setPhase("removed");
+        break;
+      case "ended":
+        setPhase((p) => (p === "left" ? p : "ended"));
+        break;
+      case "signal":
+        signalRef.current(e.from, e.data); // WebRTC offer/answer/ICE for the peer connection
+        break;
+      case "rejected":
+        poll();
+        break;
+    }
+  };
+  const socket = useMeetingSocket(code, session && active ? session.participantId : null, onEvent);
+
+  // load everything once, and again each time the socket (re)connects in case we missed events
   useEffect(() => {
-    if (!session || phase === "left" || phase === "removed" || phase === "ended") return;
-    poll();
-    const t = setInterval(poll, POLL_MS);
+    if (session && active) poll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session, socket.connected]);
+
+  // fallback: poll only while the socket is down
+  useEffect(() => {
+    if (!session || !active || socket.connected) return;
+    const t = setInterval(poll, FALLBACK_POLL_MS);
     return () => clearInterval(t);
-  }, [session, phase, poll]);
+  }, [session, active, socket.connected, poll]);
+
+  // 4. WebRTC: a peer connection to every other participant who is online.
+  const peerIds = online.filter((id) => id !== meId && participants.some((p) => p.id === id));
+  const outgoingVideo = screen?.getVideoTracks()[0] ?? media.videoStream?.getVideoTracks()[0] ?? null;
+  const peers = usePeers({ myId: meId, peerIds: active ? peerIds : [], send: socket.send, audioTrack: media.audioTrack, videoTrack: outgoingVideo });
+  useEffect(() => {
+    signalRef.current = peers.handleSignal;
+  }, [peers.handleSignal]);
 
   // meeting timer
   useEffect(() => {
@@ -199,7 +258,6 @@ export default function MeetingRoom({ code }: { code: string }) {
     try {
       const { muted } = await api.muteAll(code, session.participantId);
       flash(muted ? `Muted ${muted} participant${muted > 1 ? "s" : ""}` : "Everyone is already muted");
-      poll();
     } catch (e) {
       flash(e instanceof ApiError ? e.message : "Couldn't mute everyone.");
     }
@@ -210,7 +268,6 @@ export default function MeetingRoom({ code }: { code: string }) {
     try {
       await api.remove(code, p.id, session.participantId);
       flash(`${p.display_name} was removed`);
-      poll();
     } catch (e) {
       flash(e instanceof ApiError ? e.message : "Couldn't remove that participant.");
     }
@@ -258,7 +315,14 @@ export default function MeetingRoom({ code }: { code: string }) {
   const others = participants.filter((p) => p.id !== meId);
   const tiles = [
     { id: meId, name: session.displayName, isHost, isMe: true, muted: !media.micOn },
-    ...others.map((p) => ({ id: p.id, name: p.display_name, isHost: p.role === "host", isMe: false, muted: p.is_muted })),
+    ...others.map((p) => ({
+      id: p.id,
+      name: p.display_name,
+      isHost: p.role === "host",
+      isMe: false,
+      muted: p.is_muted,
+      remoteStream: peers.streams[p.id] ?? null,
+    })),
   ];
   const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
   const ss = String(elapsed % 60).padStart(2, "0");

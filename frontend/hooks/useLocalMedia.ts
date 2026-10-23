@@ -13,6 +13,8 @@ export function useLocalMedia(initial: { videoOn: boolean; micOn: boolean }) {
   const [micOn, setMicOn] = useState(initial.micOn);
   const [error, setError] = useState<string | null>(null);
   const audioRef = useRef<MediaStream | null>(null);
+  // exposed so WebRTC can send it to other participants once the mic is opened
+  const [audioTrack, setAudioTrack] = useState<MediaStreamTrack | null>(null);
 
   // camera: request a stream while video is on, stop it when turned off or unmounted
   useEffect(() => {
@@ -53,6 +55,7 @@ export function useLocalMedia(initial: { videoOn: boolean; micOn: boolean }) {
       .getUserMedia({ audio: true })
       .then((s) => {
         audioRef.current = s;
+        setAudioTrack(s.getAudioTracks()[0] ?? null);
       })
       .catch(() => {
         /* no mic: we still show the mute state in the UI */
@@ -68,6 +71,7 @@ export function useLocalMedia(initial: { videoOn: boolean; micOn: boolean }) {
     setVideoOn,
     micOn,
     setMicOn,
+    audioTrack,
     error,
   };
 }

@@ -1,6 +1,8 @@
 // Typed wrapper around the FastAPI backend. Every network call in the app goes through here.
 
 export const API_URL = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").replace(/\/$/, "");
+/** Same server, WebSocket scheme: http -> ws, https -> wss. */
+export const WS_URL = API_URL.replace(/^http/, "ws");
 
 export type User = { id: number; name: string; email: string };
 

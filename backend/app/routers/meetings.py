@@ -12,6 +12,7 @@ from ..config import FRONTEND_URL
 from ..database import get_db
 from ..deps import get_current_user
 from ..models import Meeting, Message, Participant, User, utcnow
+from ..realtime import broadcast_participants, manager, notify
 from ..schemas import (
     InstantMeetingCreate,
     JoinRequest,
@@ -207,8 +208,10 @@ def delete_meeting(code: str, db: Session = Depends(get_db), user: User = Depend
     meeting = get_meeting_or_404(db, code)
     if meeting.host_id != user.id:
         raise HTTPException(status_code=403, detail="Only the host can delete this meeting.")
+    code = meeting.meeting_code
     db.delete(meeting)
     db.commit()
+    notify(manager.broadcast, code, {"type": "ended"})
     return Response(status_code=204)
 
 
@@ -231,6 +234,7 @@ def join_meeting(code: str, payload: JoinRequest, db: Session = Depends(get_db))
     db.add(participant)
     db.commit()
     db.refresh(participant)
+    notify(broadcast_participants, meeting.meeting_code)
     return participant
 
 
@@ -256,6 +260,7 @@ def update_participant(code: str, participant_id: int, payload: ParticipantUpdat
         participant.is_video_on = payload.is_video_on
     db.commit()
     db.refresh(participant)
+    notify(broadcast_participants, normalize_code(code))
     return participant
 
 
@@ -269,6 +274,10 @@ def leave_meeting(code: str, participant_id: int, db: Session = Depends(get_db))
     if meeting.status == "live" and not active_participants(meeting):
         end_meeting_now(meeting)
     db.commit()
+    if meeting.status == "ended":
+        notify(manager.broadcast, meeting.meeting_code, {"type": "ended"})
+    else:
+        notify(broadcast_participants, meeting.meeting_code)
     return {"status": meeting.status}
 
 
@@ -303,10 +312,12 @@ def send_message(code: str, payload: MessageCreate, db: Session = Depends(get_db
     db.add(message)
     db.commit()
     db.refresh(message)
-    return MessageOut(
+    out = MessageOut(
         id=message.id, participant_id=sender.id, sender_name=sender.display_name,
         content=message.content, created_at=message.created_at,
     )
+    notify(manager.broadcast, meeting.meeting_code, {"type": "message", "message": out.model_dump(mode="json")})
+    return out
 
 
 # ---------------------------------------------------------------- host controls
@@ -329,6 +340,7 @@ def mute_all(code: str, host_participant_id: int, db: Session = Depends(get_db))
             p.is_muted = True
             muted += 1
     db.commit()
+    notify(broadcast_participants, meeting.meeting_code)
     return {"muted": muted}
 
 
@@ -342,6 +354,8 @@ def remove_participant(code: str, participant_id: int, host_participant_id: int,
     participant.is_removed = True
     participant.left_at = participant.left_at or utcnow()
     db.commit()
+    notify(manager.send, meeting.meeting_code, participant.id, {"type": "removed"})
+    notify(broadcast_participants, meeting.meeting_code)
     return {"removed": participant.id}
 
 
@@ -352,4 +366,5 @@ def end_meeting(code: str, host_participant_id: int, db: Session = Depends(get_d
     require_host(meeting, host_participant_id)
     end_meeting_now(meeting)
     db.commit()
+    notify(manager.broadcast, meeting.meeting_code, {"type": "ended"})
     return {"status": "ended"}

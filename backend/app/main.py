@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import CORS_ORIGINS
 from .database import Base, SessionLocal, engine
+from . import realtime
 from .routers import meetings, users
 from .seed import seed
 
@@ -34,6 +35,7 @@ app.add_middleware(
 
 app.include_router(users.router)
 app.include_router(meetings.router)
+app.include_router(realtime.router)  # WebSocket: live events + WebRTC signaling
 
 
 @app.get("/", tags=["health"])

@@ -23,9 +23,26 @@ A web clone of Zoom's meeting workflows. You can start an instant meeting, join 
 - **Schedule meeting:** topic, description, date, time (15-minute steps, local time zone) and duration. The meeting is saved to the database with an auto-generated link and shows up in Upcoming immediately. You can copy the invitation or delete it.
 
 **Bonus**
-- **Host controls:** Mute all, remove a participant, and End meeting for all. Participants who are muted or removed by the host see it within a few seconds.
+- **Video calls (WebRTC):** participants see and hear each other. Browsers connect peer to peer; the server only relays the signaling messages. Screen sharing is sent to everyone in place of your camera.
+- **Real-time updates (WebSockets):** joins, leaves, chat, mute and remove reach everyone instantly. Closing the tab counts as leaving after a 10-second grace period (a page refresh doesn't kick you out).
+- **Host controls:** Mute all, remove a participant, and End meeting for all.
 - **In-meeting chat:** messages are stored in the DB, with an unread badge.
-- Camera and mic preview, screen sharing (`getDisplayMedia`), reactions, meeting info popover (ID, passcode, copy link) and a meeting timer.
+- Camera and mic preview, reactions, meeting info popover (ID, passcode, copy link) and a meeting timer.
+
+## How real-time and video work
+
+```
+Browser A  ── WebSocket ──►  FastAPI  ◄── WebSocket ──  Browser B
+   │   events: participants, message, removed, ended          │
+   │   signal: SDP offer/answer + ICE candidates (relayed)    │
+   └──────────────── WebRTC audio/video (peer to peer) ───────┘
+```
+
+1. After joining, each browser opens `ws://…/ws/meetings/{code}?participant_id=…` (`backend/app/realtime.py`, `frontend/hooks/useMeetingSocket.ts`).
+2. REST endpoints still do the work (join, chat, mute…), and after each change the server **pushes** an event to everyone in the room instead of clients polling.
+3. For video, every participant opens an `RTCPeerConnection` to every other online participant (`frontend/hooks/usePeers.ts`). Offers, answers and ICE candidates travel over the socket, using the "perfect negotiation" pattern so simultaneous offers don't collide.
+4. STUN (Google's public servers) finds each browser's public address. On strict networks set a TURN relay with `NEXT_PUBLIC_TURN_URL`, `NEXT_PUBLIC_TURN_USERNAME`, `NEXT_PUBLIC_TURN_CREDENTIAL`.
+5. If the socket drops, the client reconnects with backoff and polls every 5 s until it's back.
 - **Meetings tab:** an Upcoming/Previous list with a details pane, like Zoom's.
 - **Responsive:** works on mobile, tablet and desktop. The toolbar collapses to icons, and side panels go full-screen on phones.
 
@@ -71,6 +88,7 @@ Interactive docs are at `/docs` (Swagger).
 | POST | `/api/meetings/{code}/mute-all?host_participant_id=` | Host: mute everyone |
 | DELETE | `/api/meetings/{code}/participants/{id}?host_participant_id=` | Host: remove a participant |
 | POST | `/api/meetings/{code}/end?host_participant_id=` | Host: end the meeting for all |
+| WS | `/ws/meetings/{code}?participant_id=` | Live events + WebRTC signaling |
 
 ## Project structure
 
@@ -122,9 +140,8 @@ The frontend calls `http://localhost:8000` by default. To change it, set `NEXT_P
 | Backend | `FRONTEND_URL` | `https://your-app.vercel.app` (used to build invite links) |
 | Backend | `CORS_ORIGINS` | `https://your-app.vercel.app` (comma-separated; defaults to `FRONTEND_URL`) |
 | Backend | `DATABASE_URL` | `sqlite:///./zoom.db` (default) |
-| Frontend | `NEXT_PUBLIC_API_URL` | `https://your-api.onrender.com` |
-
-## Deployment
+| Frontend | `NEXT_PUBLIC_API_URL` | `https://your-api.example.com` (the WebSocket URL is derived from it) |
+| Frontend | `NEXT_PUBLIC_TURN_URL` / `_USERNAME` / `_CREDENTIAL` | Optional TURN relay for video across strict networks |
 
 ## Deployment
 
@@ -138,7 +155,6 @@ The frontend calls `http://localhost:8000` by default. To change it, set `NEXT_P
 
 - **No login** (per the brief). The first seeded user, Nikhil Sharma, is always "logged in" through one dependency (`get_current_user`), so real auth would only change that file.
 - **Host actions** are authorized by checking that the acting participant has the `host` role in that meeting. Without real auth this is trust-based, which is fine for a demo.
-- **Video and audio are local only.** Each person sees their own camera, and others appear as avatar tiles with their live mute and video status. Streaming media between browsers would need WebRTC plus a signalling server (or an SFU), which is outside the scope of this assignment.
-- **Real-time updates use polling** (every 2.5 seconds) rather than WebSockets. That's simple and reliable on free hosting.
-- Closing the tab without clicking Leave leaves that participant listed until the host removes them or ends the meeting.
+- **Video is a mesh:** each browser sends its stream to every other participant, which suits small meetings (about 2–4 people). Larger rooms would use an SFU such as LiveKit or mediasoup.
+- **One server process:** open sockets live in memory, so running several backend instances would need Redis pub/sub to share events between them.
 - The UI recreates Zoom's layout, colours (Zoom blue `#0B5CFF`, orange `#FF742E`) and font (Lato), but uses a generic camera icon instead of Zoom's logo.
