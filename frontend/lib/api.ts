@@ -109,7 +109,9 @@ export const api = {
 
   upcoming: () => request<Meeting[]>("/api/meetings/upcoming"),
   recent: () => request<Meeting[]>("/api/meetings/recent"),
-  getMeeting: (code: string) => request<Meeting>(`/api/meetings/${encodeURIComponent(code)}`),
+  // sends my participant token if I'm in this meeting, so the passcode is included
+  getMeeting: (code: string) =>
+    request<Meeting>(`/api/meetings/${encodeURIComponent(code)}`, {}, { meeting: code, redirectOn401: false }),
   deleteMeeting: (code: string) => request<void>(`/api/meetings/${code}`, { method: "DELETE" }),
 
   createInstant: () => post<Meeting>("/api/meetings/instant", {}),
@@ -117,8 +119,8 @@ export const api = {
     post<Meeting>("/api/meetings/schedule", data),
 
   // asAccount: join as my account (host of my own meetings) instead of as a guest
-  join: (code: string, display_name: string, asAccount: boolean) =>
-    post<JoinResult>(`/api/meetings/${code}/join`, { display_name }, { asAccount, redirectOn401: false }),
+  join: (code: string, display_name: string, asAccount: boolean, passcode = "") =>
+    post<JoinResult>(`/api/meetings/${code}/join`, { display_name, passcode }, { asAccount, redirectOn401: false }),
   leave: (code: string, participantId: number) =>
     post<{ status: string }>(`/api/meetings/${code}/participants/${participantId}/leave`, undefined, { meeting: code }),
   participants: (code: string) => request<Participant[]>(`/api/meetings/${code}/participants`),
@@ -131,6 +133,8 @@ export const api = {
   sendMessage: (code: string, content: string) => post<ChatMessage>(`/api/meetings/${code}/messages`, { content }, { meeting: code }),
 
   // host controls: the backend checks my participant token belongs to the host
+  muteOne: (code: string, participantId: number) =>
+    post<{ muted: number }>(`/api/meetings/${code}/participants/${participantId}/mute`, undefined, { meeting: code }),
   muteAll: (code: string) => post<{ muted: number }>(`/api/meetings/${code}/mute-all`, undefined, { meeting: code }),
   remove: (code: string, participantId: number) =>
     request<{ removed: number }>(`/api/meetings/${code}/participants/${participantId}`, { method: "DELETE" }, { meeting: code }),

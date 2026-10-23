@@ -4,7 +4,7 @@ import secrets
 import string
 from datetime import timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Response
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
@@ -13,7 +13,7 @@ from ..database import get_db
 from ..deps import get_current_participant, get_current_user, get_optional_user
 from ..models import Meeting, Message, Participant, User, utcnow
 from ..realtime import broadcast_participants, manager, notify
-from ..security import create_token
+from ..security import create_token, read_token
 from ..schemas import (
     InstantMeetingCreate,
     JoinOut,
@@ -36,7 +36,9 @@ def active_participants(meeting: Meeting) -> list[Participant]:
     return [p for p in meeting.participants if p.left_at is None and not p.is_removed]
 
 
-def to_out(m: Meeting) -> MeetingOut:
+def to_out(m: Meeting, reveal: bool = True) -> MeetingOut:
+    """reveal=False hides the passcode (and keeps it out of the invite link) for outsiders."""
+    link = f"{FRONTEND_URL}/join/{m.meeting_code}"
     return MeetingOut(
         id=m.id,
         meeting_code=m.meeting_code,
@@ -46,10 +48,10 @@ def to_out(m: Meeting) -> MeetingOut:
         status=m.status,
         scheduled_start=m.scheduled_start,
         duration_minutes=m.duration_minutes,
-        passcode=m.passcode,
+        passcode=m.passcode if reveal else "",
         host_id=m.host_id,
         host_name=m.host.name,
-        invite_link=f"{FRONTEND_URL}/join/{m.meeting_code}",
+        invite_link=f"{link}?pwd={m.passcode}" if reveal else link,  # like Zoom: the link carries the passcode
         participant_count=len(active_participants(m)),
         total_participants=len({p.display_name for p in m.participants}),
         created_at=m.created_at,
@@ -199,9 +201,18 @@ def recent_meetings(db: Session = Depends(get_db), user: User = Depends(get_curr
 # ---------------------------------------------------------------- single meeting
 
 @router.get("/{code}", response_model=MeetingOut)
-def get_meeting(code: str, db: Session = Depends(get_db)):
-    """Used by Join to validate that a meeting exists before asking for a name."""
-    return to_out(get_meeting_or_404(db, code))
+def get_meeting(
+    code: str,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(get_optional_user),
+    x_participant_token: str | None = Header(default=None),
+):
+    """Used by Join to validate that a meeting exists. Only the host and people already
+    in the meeting see the passcode; anyone else just learns the meeting exists."""
+    meeting = get_meeting_or_404(db, code)
+    seat = read_token(x_participant_token, "participant")
+    reveal = (user is not None and user.id == meeting.host_id) or (seat is not None and seat.get("mtg") == meeting.meeting_code)
+    return to_out(meeting, reveal=reveal)
 
 
 @router.delete("/{code}", status_code=204)
@@ -230,6 +241,9 @@ def join_meeting(
 
     # host only if the login token belongs to the meeting's host (guests send no token)
     is_host = user is not None and user.id == meeting.host_id
+    # everyone except the host needs the passcode (invite links include it as ?pwd=)
+    if not is_host and not secrets.compare_digest(payload.passcode.strip().encode(), meeting.passcode.encode()):
+        raise HTTPException(status_code=403, detail="Incorrect meeting passcode.")
     participant = Participant(
         meeting_id=meeting.id,
         user_id=user.id if user else None,
@@ -370,6 +384,25 @@ def mute_all(code: str, db: Session = Depends(get_db), me: Participant = Depends
     db.commit()
     notify(broadcast_participants, meeting.meeting_code)
     return {"muted": muted}
+
+
+@router.post("/{code}/participants/{participant_id}/mute")
+def mute_participant(
+    code: str,
+    participant_id: int,
+    db: Session = Depends(get_db),
+    me: Participant = Depends(get_current_participant),
+):
+    """Host mutes one person. Like Zoom, the host can mute but never unmute someone else."""
+    meeting = get_meeting_or_404(db, code)
+    require_host(me)
+    target = get_participant_or_404(meeting, participant_id)
+    if target.left_at is not None or target.is_removed:
+        raise HTTPException(status_code=400, detail="That person is no longer in the meeting.")
+    target.is_muted = True
+    db.commit()
+    notify(broadcast_participants, meeting.meeting_code)
+    return {"muted": target.id}
 
 
 @router.delete("/{code}/participants/{participant_id}")

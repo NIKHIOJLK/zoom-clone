@@ -11,7 +11,7 @@ import { useLocalMedia } from "@/hooks/useLocalMedia";
 import { api, ApiError, type Meeting } from "@/lib/api";
 import { formatMeetingId, timeRange, dayLabel } from "@/lib/format";
 import { rememberName, saveSession } from "@/lib/session";
-import { useRememberedName } from "@/hooks/useBrowserValue";
+import { useRememberedName, useUrlParam } from "@/hooks/useBrowserValue";
 
 /** Landing page for an invite link: preview your camera, enter your name, join. */
 export default function PreJoin({ code }: { code: string }) {
@@ -24,6 +24,11 @@ export default function PreJoin({ code }: { code: string }) {
   // until the user types, prefill with their remembered name or the account name
   const name = typedName ?? (savedName || user?.name || "");
   const [remember, setRemember] = useState(true);
+  // invite links carry the passcode (?pwd=); joining by ID asks for it. The host never needs it.
+  const linkPasscode = useUrlParam("pwd");
+  const [typedPasscode, setPasscode] = useState("");
+  const isMyMeeting = !!user && !!meeting && user.id === meeting.host_id;
+  const needsPasscode = !linkPasscode && !isMyMeeting;
   const [busy, setBusy] = useState(false);
   const [joinError, setJoinError] = useState<string | null>(null);
   const media = useLocalMedia({ videoOn: true, micOn: true });
@@ -45,7 +50,7 @@ export default function PreJoin({ code }: { code: string }) {
       // join as my account only under the account's own name,
       // so a second tab joining as "Guest" stays a normal participant
       const asAccount = !!user && name.trim() === user.name;
-      const p = await api.join(meeting.meeting_code, name.trim(), asAccount);
+      const p = await api.join(meeting.meeting_code, name.trim(), asAccount, linkPasscode || typedPasscode);
       if (remember) rememberName(name.trim());
       saveSession(meeting.meeting_code, {
         participantId: p.id,
@@ -117,6 +122,22 @@ export default function PreJoin({ code }: { code: string }) {
             placeholder="Enter your name"
             className="rounded-lg border border-room-border bg-room-panel px-3 py-2.5 text-white outline-none focus:border-zoom-blue"
           />
+          {needsPasscode && (
+            <>
+              <label className="text-sm text-room-muted" htmlFor="passcode">
+                Meeting passcode
+              </label>
+              <input
+                id="passcode"
+                value={typedPasscode}
+                onChange={(e) => setPasscode(e.target.value)}
+                maxLength={20}
+                autoComplete="off"
+                placeholder="Enter the meeting passcode"
+                className="rounded-lg border border-room-border bg-room-panel px-3 py-2.5 text-white outline-none focus:border-zoom-blue"
+              />
+            </>
+          )}
           <label className="flex items-center gap-2 text-sm text-room-muted">
             <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} className="h-4 w-4 accent-zoom-blue" />
             Remember my name for future meetings
@@ -127,7 +148,7 @@ export default function PreJoin({ code }: { code: string }) {
             </p>
           )}
           <button
-            disabled={!meeting || !name.trim() || busy}
+            disabled={!meeting || !name.trim() || (needsPasscode && !typedPasscode.trim()) || busy}
             className="mt-1 rounded-lg bg-zoom-blue py-2.5 font-bold hover:bg-zoom-blue-hover disabled:opacity-40"
           >
             {busy ? "Joining…" : "Join"}

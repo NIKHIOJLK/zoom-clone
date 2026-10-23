@@ -25,7 +25,8 @@ A web clone of Zoom's meeting workflows. You can start an instant meeting, join 
 **Bonus**
 - **Video calls (WebRTC):** participants see and hear each other. Browsers connect peer to peer; the server only relays the signaling messages. Screen sharing is sent to everyone in place of your camera.
 - **Real-time updates (WebSockets):** joins, leaves, chat, mute and remove reach everyone instantly. Closing the tab counts as leaving after a 10-second grace period (a page refresh doesn't kick you out).
-- **Host controls:** Mute all, remove a participant, and End meeting for all.
+- **Host controls:** mute one person, mute all, remove a participant, and End meeting for all. Like Zoom, the host can mute but never unmute someone else.
+- **Passcodes:** joining by meeting ID asks for the passcode; invite links carry it (`/join/<id>?pwd=…`), and the host never needs it. People outside the meeting can't read the passcode from the API.
 - **In-meeting chat:** messages are stored in the DB, with an unread badge.
 - Camera and mic preview, reactions, meeting info popover (ID, passcode, copy link) and a meeting timer.
 
@@ -89,11 +90,12 @@ Interactive docs are at `/docs` (Swagger).
 | GET | `/api/meetings/upcoming` | Upcoming scheduled meetings |
 | GET | `/api/meetings/recent` | Ended meetings hosted or attended |
 | GET / DELETE | `/api/meetings/{code}` | Validate and look up, or delete a meeting |
-| POST | `/api/meetings/{code}/join` | Join with a display name; returns a participant token |
+| POST | `/api/meetings/{code}/join` | Join with a display name (+ passcode unless you're the host); returns a participant token |
 | GET | `/api/meetings/{code}/participants` | People currently in the meeting |
 | PATCH | `/api/meetings/{code}/participants/{id}` | Update own mute or video state |
 | POST | `/api/meetings/{code}/participants/{id}/leave` | Leave the meeting |
 | GET / POST | `/api/meetings/{code}/messages` | Chat |
+| POST | `/api/meetings/{code}/participants/{id}/mute` | Host: mute one person |
 | POST | `/api/meetings/{code}/mute-all` | Host: mute everyone |
 | DELETE | `/api/meetings/{code}/participants/{id}` | Host: remove a participant |
 | POST | `/api/meetings/{code}/end` | Host: end the meeting for all |
@@ -142,7 +144,16 @@ npm run dev                      # http://localhost:3000
 ```
 The frontend calls `http://localhost:8000` by default. To change it, set `NEXT_PUBLIC_API_URL` in `frontend/.env.local`.
 
-**To try host controls:** start a meeting, copy the invite link from the green shield icon or Participants → Invite, and open it in an incognito window as a guest.
+**To try a call:** sign in with **Use demo account**, start a meeting, copy the invite link from the green shield icon or Participants → Invite, and open it in another browser (or an incognito window) as a guest. You'll see and hear yourself twice.
+
+## Tests
+
+```bash
+cd backend
+pip install -r requirements-dev.txt
+python -m pytest -q
+```
+24 tests cover login and signup, passcodes, host-only controls, forged or borrowed tokens, chat, leaving, and the WebSocket (events, signaling relay, rejected sockets). GitHub Actions (`.github/workflows/ci.yml`) runs them plus the frontend lint and production build on every push.
 
 ## Environment variables
 

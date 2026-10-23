@@ -18,6 +18,12 @@ export function extractMeetingCode(input: string): string {
   return (fromLink ? fromLink[1] : trimmed).replace(/\D/g, "");
 }
 
+/** The passcode from an invite link like ".../join/8472916305?pwd=Zm6305" ("" if none). */
+export function extractPasscode(input: string): string {
+  const m = input.match(/[?&]pwd=([^&\s#]+)/);
+  return m ? decodeURIComponent(m[1]) : "";
+}
+
 export const timeOf = (iso: string) => format(new Date(iso), "h:mm a");
 
 /** "Today", "Tomorrow", or "Sat, Oct 10" */

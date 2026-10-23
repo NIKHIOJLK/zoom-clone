@@ -23,6 +23,15 @@ export function useNowSeconds(): number | null {
 
 const noSubscribe = () => () => {};
 
+/** A query-string value from the current URL, e.g. useUrlParam("pwd") ("" on the server). */
+export function useUrlParam(name: string): string {
+  return useSyncExternalStore(
+    noSubscribe,
+    () => new URLSearchParams(window.location.search).get(name) ?? "",
+    () => "",
+  );
+}
+
 /** The name saved with "Remember my name" ("" on the server). */
 export function useRememberedName(): string {
   return useSyncExternalStore(noSubscribe, rememberedName, () => "");

@@ -263,6 +263,15 @@ export default function MeetingRoom({ code }: { code: string }) {
     }
   }
 
+  async function muteOne(p: Participant) {
+    try {
+      await api.muteOne(code, p.id);
+      flash(`${p.display_name} was muted`);
+    } catch (e) {
+      flash(e instanceof ApiError ? e.message : "Couldn't mute that participant.");
+    }
+  }
+
   async function remove(p: Participant) {
     if (!session || !confirm(`Remove ${p.display_name} from the meeting?`)) return;
     try {
@@ -388,6 +397,7 @@ export default function MeetingRoom({ code }: { code: string }) {
                 inviteLink={meeting.invite_link}
                 onClose={() => setPanel(null)}
                 onMuteAll={muteAll}
+                onMute={muteOne}
                 onRemove={remove}
               />
             ) : (

@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import Modal, { PrimaryButton, SecondaryButton } from "./Modal";
 import { api, ApiError, type User } from "@/lib/api";
-import { extractMeetingCode } from "@/lib/format";
+import { extractMeetingCode, extractPasscode } from "@/lib/format";
 import { rememberedName, rememberName, saveSession } from "@/lib/session";
 
 type Props = { user: User | null; onClose: () => void };
@@ -14,6 +14,7 @@ export default function JoinMeetingModal({ user, onClose }: Props) {
   const router = useRouter();
   const [idOrLink, setIdOrLink] = useState("");
   const [name, setName] = useState(() => rememberedName() || user?.name || "");
+  const [passcode, setPasscode] = useState("");
   const [remember, setRemember] = useState(true);
   const [noAudio, setNoAudio] = useState(false);
   const [videoOff, setVideoOff] = useState(false);
@@ -31,7 +32,7 @@ export default function JoinMeetingModal({ user, onClose }: Props) {
     try {
       const meeting = await api.getMeeting(code); // validates the meeting exists
       if (meeting.status === "ended") throw new ApiError(410, "This meeting has ended.");
-      const p = await api.join(code, name.trim(), !!user);
+      const p = await api.join(code, name.trim(), !!user, extractPasscode(idOrLink) || passcode);
       if (remember) rememberName(name.trim());
       saveSession(code, {
         participantId: p.id,
@@ -77,6 +78,17 @@ export default function JoinMeetingModal({ user, onClose }: Props) {
             error ? "border-zoom-red" : "border-zoom-border"
           }`}
         />
+        {!extractPasscode(idOrLink) && (
+          <input
+            aria-label="Meeting passcode"
+            value={passcode}
+            onChange={(e) => setPasscode(e.target.value)}
+            placeholder="Passcode (not needed for your own meetings)"
+            maxLength={20}
+            autoComplete="off"
+            className="w-full rounded-lg border border-zoom-border px-3 py-2.5 text-[15px] outline-none focus:border-zoom-blue"
+          />
+        )}
         <input
           aria-label="Your name"
           value={name}

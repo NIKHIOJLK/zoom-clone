@@ -99,7 +99,7 @@ class MeetingOut(BaseModel):
     status: str
     scheduled_start: Optional[UTCDateTime] = None
     duration_minutes: int
-    passcode: str
+    passcode: str  # "" unless the caller is the host or already in the meeting
     host_id: int
     host_name: str
     invite_link: str
@@ -113,6 +113,7 @@ class MeetingOut(BaseModel):
 class JoinRequest(BaseModel):
     # who the account is comes from the login token (if sent), never from the request body
     display_name: str = Field(max_length=60)
+    passcode: str = Field(default="", max_length=20)  # not needed by the host
 
     @field_validator("display_name")
     @classmethod

@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import TopNav from "@/components/TopNav";
 import { api, ApiError } from "@/lib/api";
-import { extractMeetingCode } from "@/lib/format";
+import { extractMeetingCode, extractPasscode } from "@/lib/format";
 
 // /join — standalone "Join a meeting" page (like zoom.us/join)
 export default function JoinPage() {
@@ -20,7 +20,8 @@ export default function JoinPage() {
     setError(null);
     try {
       await api.getMeeting(code);
-      router.push(`/join/${code}`);
+      const pwd = extractPasscode(value); // keep the passcode if a full invite link was pasted
+      router.push(`/join/${code}${pwd ? `?pwd=${encodeURIComponent(pwd)}` : ""}`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Couldn't find that meeting.");
       setBusy(false);

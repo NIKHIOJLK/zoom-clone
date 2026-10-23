@@ -12,11 +12,12 @@ type Props = {
   inviteLink: string;
   onClose: () => void;
   onMuteAll: () => void;
+  onMute: (p: Participant) => void;
   onRemove: (p: Participant) => void;
 };
 
 /** Right-side panel listing everyone in the meeting, with host controls. */
-export default function ParticipantsPanel({ participants, meId, isHost, inviteLink, onClose, onMuteAll, onRemove }: Props) {
+export default function ParticipantsPanel({ participants, meId, isHost, inviteLink, onClose, onMuteAll, onMute, onRemove }: Props) {
   const [copied, setCopied] = useState(false);
   // me first, then host, then everyone else by join time
   const sorted = [...participants].sort(
@@ -50,6 +51,15 @@ export default function ParticipantsPanel({ participants, meId, isHost, inviteLi
                   {p.role === "host" && isMe ? " (Host, me)" : p.role === "host" ? " (Host)" : isMe ? " (me)" : ""}
                 </span>
               </span>
+              {isHost && !isMe && !p.is_muted && (
+                <button
+                  onClick={() => onMute(p)}
+                  aria-label={`Mute ${p.display_name}`}
+                  className="hidden items-center gap-1 rounded-md border border-zoom-border bg-white px-2 py-1 text-xs font-bold group-hover:flex focus:flex"
+                >
+                  <MicOff size={13} /> Mute
+                </button>
+              )}
               {isHost && !isMe && p.role !== "host" && (
                 <button
                   onClick={() => onRemove(p)}
