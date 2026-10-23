@@ -4,6 +4,7 @@
 
 export type MeetingSession = {
   participantId: number;
+  participantToken: string; // signed by the server on join; proves who I am in this meeting
   displayName: string;
   role: "host" | "participant";
   startMuted: boolean;
@@ -24,7 +25,8 @@ export function saveSession(code: string, s: MeetingSession) {
 export function loadSession(code: string): MeetingSession | null {
   try {
     const raw = sessionStorage.getItem(key(code));
-    return raw ? (JSON.parse(raw) as MeetingSession) : null;
+    const s = raw ? (JSON.parse(raw) as MeetingSession) : null;
+    return s?.participantToken ? s : null; // sessions from before tokens existed: join again
   } catch {
     return null;
   }

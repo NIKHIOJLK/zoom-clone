@@ -15,9 +15,10 @@ export function useStartMeeting(user: User | null) {
 
   async function enterAsHost(code: string) {
     if (!user) return;
-    const p = await api.join(code, user.name, user.id);
+    const p = await api.join(code, user.name, true); // my login token makes me the host
     saveSession(code, {
       participantId: p.id,
+      participantToken: p.participant_token,
       displayName: p.display_name,
       role: p.role,
       startMuted: false,

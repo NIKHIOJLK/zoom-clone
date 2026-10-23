@@ -10,11 +10,13 @@ from sqlalchemy.orm import Session
 
 from ..config import FRONTEND_URL
 from ..database import get_db
-from ..deps import get_current_user
+from ..deps import get_current_participant, get_current_user, get_optional_user
 from ..models import Meeting, Message, Participant, User, utcnow
 from ..realtime import broadcast_participants, manager, notify
+from ..security import create_token
 from ..schemas import (
     InstantMeetingCreate,
+    JoinOut,
     JoinRequest,
     MeetingOut,
     MessageCreate,
@@ -215,16 +217,22 @@ def delete_meeting(code: str, db: Session = Depends(get_db), user: User = Depend
     return Response(status_code=204)
 
 
-@router.post("/{code}/join", response_model=ParticipantOut, status_code=201)
-def join_meeting(code: str, payload: JoinRequest, db: Session = Depends(get_db)):
+@router.post("/{code}/join", response_model=JoinOut, status_code=201)
+def join_meeting(
+    code: str,
+    payload: JoinRequest,
+    db: Session = Depends(get_db),
+    user: User | None = Depends(get_optional_user),
+):
     meeting = get_meeting_or_404(db, code)
     if meeting.status == "ended":
         raise HTTPException(status_code=410, detail="This meeting has ended.")
 
-    is_host = payload.user_id is not None and payload.user_id == meeting.host_id
+    # host only if the login token belongs to the meeting's host (guests send no token)
+    is_host = user is not None and user.id == meeting.host_id
     participant = Participant(
         meeting_id=meeting.id,
-        user_id=payload.user_id,
+        user_id=user.id if user else None,
         display_name=payload.display_name,
         role="host" if is_host else "participant",
     )
@@ -235,7 +243,8 @@ def join_meeting(code: str, payload: JoinRequest, db: Session = Depends(get_db))
     db.commit()
     db.refresh(participant)
     notify(broadcast_participants, meeting.meeting_code)
-    return participant
+    token = create_token("participant", participant.id, mtg=meeting.meeting_code)
+    return JoinOut(**ParticipantOut.model_validate(participant).model_dump(), participant_token=token)
 
 
 @router.get("/{code}/participants", response_model=list[ParticipantOut])
@@ -251,8 +260,16 @@ def get_participant(code: str, participant_id: int, db: Session = Depends(get_db
 
 
 @router.patch("/{code}/participants/{participant_id}", response_model=ParticipantOut)
-def update_participant(code: str, participant_id: int, payload: ParticipantUpdate, db: Session = Depends(get_db)):
+def update_participant(
+    code: str,
+    participant_id: int,
+    payload: ParticipantUpdate,
+    db: Session = Depends(get_db),
+    me: Participant = Depends(get_current_participant),
+):
     """Toggle your own mic / camera state."""
+    if me.id != participant_id:
+        raise HTTPException(status_code=403, detail="You can only change your own mic and camera.")
     participant = get_participant_or_404(get_meeting_or_404(db, code), participant_id)
     if payload.is_muted is not None:
         participant.is_muted = payload.is_muted
@@ -265,7 +282,14 @@ def update_participant(code: str, participant_id: int, payload: ParticipantUpdat
 
 
 @router.post("/{code}/participants/{participant_id}/leave")
-def leave_meeting(code: str, participant_id: int, db: Session = Depends(get_db)):
+def leave_meeting(
+    code: str,
+    participant_id: int,
+    db: Session = Depends(get_db),
+    me: Participant = Depends(get_current_participant),
+):
+    if me.id != participant_id:
+        raise HTTPException(status_code=403, detail="You can only leave for yourself.")
     meeting = get_meeting_or_404(db, code)
     participant = get_participant_or_404(meeting, participant_id)
     if participant.left_at is None:
@@ -303,9 +327,14 @@ def list_messages(code: str, after_id: int = 0, db: Session = Depends(get_db)):
 
 
 @router.post("/{code}/messages", response_model=MessageOut, status_code=201)
-def send_message(code: str, payload: MessageCreate, db: Session = Depends(get_db)):
+def send_message(
+    code: str,
+    payload: MessageCreate,
+    db: Session = Depends(get_db),
+    me: Participant = Depends(get_current_participant),
+):
     meeting = get_meeting_or_404(db, code)
-    sender = get_participant_or_404(meeting, payload.participant_id)
+    sender = get_participant_or_404(meeting, me.id)
     if sender.left_at is not None or sender.is_removed:
         raise HTTPException(status_code=403, detail="You are no longer in this meeting.")
     message = Message(meeting_id=meeting.id, participant_id=sender.id, content=payload.content)
@@ -321,19 +350,18 @@ def send_message(code: str, payload: MessageCreate, db: Session = Depends(get_db
 
 
 # ---------------------------------------------------------------- host controls
-# Every host action takes the acting participant's id and checks it is the host.
+# The acting participant comes from their participant token, so it can't be faked.
 
-def require_host(meeting: Meeting, acting_participant_id: int) -> Participant:
-    actor = get_participant_or_404(meeting, acting_participant_id)
-    if actor.role != "host":
+def require_host(actor: Participant) -> Participant:
+    if actor.role != "host" or actor.is_removed:
         raise HTTPException(status_code=403, detail="Only the host can do this.")
     return actor
 
 
 @router.post("/{code}/mute-all")
-def mute_all(code: str, host_participant_id: int, db: Session = Depends(get_db)):
+def mute_all(code: str, db: Session = Depends(get_db), me: Participant = Depends(get_current_participant)):
     meeting = get_meeting_or_404(db, code)
-    require_host(meeting, host_participant_id)
+    require_host(me)
     muted = 0
     for p in active_participants(meeting):
         if p.role != "host" and not p.is_muted:
@@ -345,9 +373,14 @@ def mute_all(code: str, host_participant_id: int, db: Session = Depends(get_db))
 
 
 @router.delete("/{code}/participants/{participant_id}")
-def remove_participant(code: str, participant_id: int, host_participant_id: int, db: Session = Depends(get_db)):
+def remove_participant(
+    code: str,
+    participant_id: int,
+    db: Session = Depends(get_db),
+    me: Participant = Depends(get_current_participant),
+):
     meeting = get_meeting_or_404(db, code)
-    require_host(meeting, host_participant_id)
+    require_host(me)
     participant = get_participant_or_404(meeting, participant_id)
     if participant.role == "host":
         raise HTTPException(status_code=400, detail="The host cannot be removed.")
@@ -360,10 +393,10 @@ def remove_participant(code: str, participant_id: int, host_participant_id: int,
 
 
 @router.post("/{code}/end")
-def end_meeting(code: str, host_participant_id: int, db: Session = Depends(get_db)):
+def end_meeting(code: str, db: Session = Depends(get_db), me: Participant = Depends(get_current_participant)):
     """'End meeting for all' — host only."""
     meeting = get_meeting_or_404(db, code)
-    require_host(meeting, host_participant_id)
+    require_host(me)
     end_meeting_now(meeting)
     db.commit()
     notify(manager.broadcast, meeting.meeting_code, {"type": "ended"})

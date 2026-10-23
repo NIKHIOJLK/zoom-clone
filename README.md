@@ -29,6 +29,13 @@ A web clone of Zoom's meeting workflows. You can start an instant meeting, join 
 - **In-meeting chat:** messages are stored in the DB, with an unread badge.
 - Camera and mic preview, reactions, meeting info popover (ID, passcode, copy link) and a meeting timer.
 
+## Accounts and security
+
+- **Sign up / log in** with email and password. Passwords are hashed with **bcrypt**; login returns a **JWT** (7 days) that the frontend sends as `Authorization: Bearer …`.
+- **Who you are comes from tokens, never from the request body.** The server decides whether you're the host by checking your login token against the meeting's host.
+- **Participant tokens:** joining returns a signed token for that one meeting (guests too). Chat, mute, leave, the WebSocket and host controls all require it, so nobody can act as another participant by guessing an id.
+- Wrong email and wrong password give the same error, so emails can't be probed.
+
 ## How real-time and video work
 
 ```
@@ -74,21 +81,25 @@ Interactive docs are at `/docs` (Swagger).
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/users/me` | The default logged-in user |
+| POST | `/api/auth/signup` | Create an account, returns a JWT |
+| POST | `/api/auth/login` | Log in, returns a JWT |
+| GET | `/api/users/me` | The logged-in user (needs `Authorization: Bearer <token>`) |
 | POST | `/api/meetings/instant` | Create an instant meeting |
 | POST | `/api/meetings/schedule` | Schedule a meeting |
 | GET | `/api/meetings/upcoming` | Upcoming scheduled meetings |
 | GET | `/api/meetings/recent` | Ended meetings hosted or attended |
 | GET / DELETE | `/api/meetings/{code}` | Validate and look up, or delete a meeting |
-| POST | `/api/meetings/{code}/join` | Join with a display name |
+| POST | `/api/meetings/{code}/join` | Join with a display name; returns a participant token |
 | GET | `/api/meetings/{code}/participants` | People currently in the meeting |
 | PATCH | `/api/meetings/{code}/participants/{id}` | Update own mute or video state |
 | POST | `/api/meetings/{code}/participants/{id}/leave` | Leave the meeting |
 | GET / POST | `/api/meetings/{code}/messages` | Chat |
-| POST | `/api/meetings/{code}/mute-all?host_participant_id=` | Host: mute everyone |
-| DELETE | `/api/meetings/{code}/participants/{id}?host_participant_id=` | Host: remove a participant |
-| POST | `/api/meetings/{code}/end?host_participant_id=` | Host: end the meeting for all |
-| WS | `/ws/meetings/{code}?participant_id=` | Live events + WebRTC signaling |
+| POST | `/api/meetings/{code}/mute-all` | Host: mute everyone |
+| DELETE | `/api/meetings/{code}/participants/{id}` | Host: remove a participant |
+| POST | `/api/meetings/{code}/end` | Host: end the meeting for all |
+| WS | `/ws/meetings/{code}?participant_id=&token=` | Live events + WebRTC signaling |
+
+Meeting actions (mute, leave, chat, host controls) send the participant token as `X-Participant-Token`.
 
 ## Project structure
 
@@ -140,6 +151,7 @@ The frontend calls `http://localhost:8000` by default. To change it, set `NEXT_P
 | Backend | `FRONTEND_URL` | `https://your-app.vercel.app` (used to build invite links) |
 | Backend | `CORS_ORIGINS` | `https://your-app.vercel.app` (comma-separated; defaults to `FRONTEND_URL`) |
 | Backend | `DATABASE_URL` | `sqlite:///./zoom.db` (default) |
+| Backend | `JWT_SECRET` | A long random string that signs tokens. **Set this in production** (`python -c "import secrets; print(secrets.token_urlsafe(48))"`) |
 | Frontend | `NEXT_PUBLIC_API_URL` | `https://your-api.example.com` (the WebSocket URL is derived from it) |
 | Frontend | `NEXT_PUBLIC_TURN_URL` / `_USERNAME` / `_CREDENTIAL` | Optional TURN relay for video across strict networks |
 
@@ -153,8 +165,7 @@ The frontend calls `http://localhost:8000` by default. To change it, set `NEXT_P
 
 ## Assumptions and limitations
 
-- **No login** (per the brief). The first seeded user, Nikhil Sharma, is always "logged in" through one dependency (`get_current_user`), so real auth would only change that file.
-- **Host actions** are authorized by checking that the acting participant has the `host` role in that meeting. Without real auth this is trust-based, which is fine for a demo.
+- **Demo account:** seeded users can sign in with password `demo1234` (the login page has a one-click "Use demo account" button). Guests joining by link don't need an account.
 - **Video is a mesh:** each browser sends its stream to every other participant, which suits small meetings (about 2–4 people). Larger rooms would use an SFU such as LiveKit or mediasoup.
 - **One server process:** open sockets live in memory, so running several backend instances would need Redis pub/sub to share events between them.
 - The UI recreates Zoom's layout, colours (Zoom blue `#0B5CFF`, orange `#FF742E`) and font (Lato), but uses a generic camera icon instead of Zoom's logo.

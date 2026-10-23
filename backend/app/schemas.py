@@ -1,4 +1,5 @@
 """Pydantic models: what the API accepts (…Create / …Request) and returns (…Out)."""
+import re
 from datetime import datetime
 from typing import Annotated, Optional
 
@@ -22,6 +23,55 @@ class UserOut(BaseModel):
     email: str
 
     model_config = {"from_attributes": True}
+
+
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _check_email(v: str) -> str:
+    v = v.strip().lower()
+    if not EMAIL_RE.match(v):
+        raise ValueError("Enter a valid email address")
+    return v
+
+
+class SignupRequest(BaseModel):
+    name: str = Field(max_length=100)
+    email: str = Field(max_length=255)
+    password: str = Field(min_length=8)
+
+    @field_validator("name")
+    @classmethod
+    def name_not_blank(cls, v: str) -> str:
+        return _strip_required(v, "Name")
+
+    @field_validator("email")
+    @classmethod
+    def email_valid(cls, v: str) -> str:
+        return _check_email(v)
+
+    @field_validator("password")
+    @classmethod
+    def password_fits_bcrypt(cls, v: str) -> str:
+        if len(v.encode()) > 72:  # bcrypt only uses the first 72 bytes
+            raise ValueError("Password must be at most 72 characters")
+        return v
+
+
+class LoginRequest(BaseModel):
+    email: str = Field(max_length=255)
+    password: str = Field(max_length=200)
+
+    @field_validator("email")
+    @classmethod
+    def email_normalized(cls, v: str) -> str:
+        return v.strip().lower()
+
+
+class AuthOut(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserOut
 
 
 class InstantMeetingCreate(BaseModel):
@@ -61,8 +111,8 @@ class MeetingOut(BaseModel):
 
 
 class JoinRequest(BaseModel):
+    # who the account is comes from the login token (if sent), never from the request body
     display_name: str = Field(max_length=60)
-    user_id: Optional[int] = None  # set when the logged-in user joins (makes them host of own meeting)
 
     @field_validator("display_name")
     @classmethod
@@ -88,8 +138,13 @@ class ParticipantOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class JoinOut(ParticipantOut):
+    # proves "I am this participant" for chat, mute, leave and host controls
+    participant_token: str
+
+
 class MessageCreate(BaseModel):
-    participant_id: int
+    # the sender comes from the participant token
     content: str = Field(max_length=1000)
 
     @field_validator("content")

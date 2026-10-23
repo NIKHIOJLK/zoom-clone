@@ -19,6 +19,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from .database import SessionLocal
 from .models import Meeting, Participant, utcnow
 from .schemas import ParticipantOut
+from .security import read_token
 
 # A closed socket (tab closed, network drop) only counts as "left" if the person
 # doesn't reconnect within this many seconds, so a page refresh doesn't kick them out.
@@ -110,15 +111,27 @@ def notify(coro_fn, *args) -> None:
 
 # ---------------------------------------------------------------- socket endpoint
 
+async def _reject(ws: WebSocket, code: int) -> None:
+    # accept first, then close: closing before the handshake reaches the browser as a generic
+    # error (1006), while this way the client sees our code and can react
+    await ws.accept()
+    await ws.close(code=code)
+
+
 @router.websocket("/ws/meetings/{code}")
-async def meeting_socket(ws: WebSocket, code: str, participant_id: int):
+async def meeting_socket(ws: WebSocket, code: str, participant_id: int, token: str = ""):
+    digits = "".join(ch for ch in code if ch.isdigit())
+    # the participant token from /join proves this socket really belongs to participant_id
+    claims = read_token(token, "participant")
+    if claims is None or claims.get("sub") != str(participant_id) or claims.get("mtg") != digits:
+        await _reject(ws, 4401)  # not your seat
+        return
     db = SessionLocal()
     try:
-        digits = "".join(ch for ch in code if ch.isdigit())
         meeting = db.query(Meeting).filter(Meeting.meeting_code == digits).first()
         participant = next((p for p in meeting.participants if p.id == participant_id), None) if meeting else None
         if meeting is None or participant is None or participant.is_removed or meeting.status == "ended":
-            await ws.close(code=4404)
+            await _reject(ws, 4404)  # meeting over, or you were removed
             return
         if participant.left_at is not None:  # came back after a refresh or network drop
             participant.left_at = None

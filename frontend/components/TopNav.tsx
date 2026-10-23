@@ -2,10 +2,11 @@
 
 import { Bell, CalendarDays, ContactRound, House, MessageCircle, Search, Settings, Video } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import Avatar from "./Avatar";
-import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { resetCurrentUser, useCurrentUser } from "@/hooks/useCurrentUser";
+import { clearToken } from "@/lib/auth";
 
 const TABS = [
   { href: "/", label: "Home", icon: House },
@@ -17,6 +18,7 @@ const TABS = [
 /** Top bar: app mark, Zoom-style icon tabs, search, and settings/notification/profile placeholders. */
 export default function TopNav() {
   const pathname = usePathname();
+  const router = useRouter();
   const user = useCurrentUser();
   const [menuOpen, setMenuOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -36,6 +38,12 @@ export default function TopNav() {
   }, [toast]);
 
   const comingSoon = (what: string) => setToast(`${what} isn't part of this demo yet`);
+
+  function signOut() {
+    clearToken();
+    resetCurrentUser();
+    router.replace("/login");
+  }
 
   return (
     <header className="sticky top-0 z-40 border-b border-zoom-border bg-[#f7f8fa]">
@@ -116,7 +124,8 @@ export default function TopNav() {
                     key={item}
                     onClick={() => {
                       setMenuOpen(false);
-                      comingSoon(item);
+                      if (item === "Sign out") signOut();
+                      else comingSoon(item);
                     }}
                     className="flex w-full items-center gap-2 px-4 py-2.5 text-left text-sm hover:bg-zoom-surface"
                   >

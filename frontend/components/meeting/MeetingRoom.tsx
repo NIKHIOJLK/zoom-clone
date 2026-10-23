@@ -152,7 +152,7 @@ export default function MeetingRoom({ code }: { code: string }) {
         break;
     }
   };
-  const socket = useMeetingSocket(code, session && active ? session.participantId : null, onEvent);
+  const socket = useMeetingSocket(code, session && active ? session : null, onEvent);
 
   // load everything once, and again each time the socket (re)connects in case we missed events
   useEffect(() => {
@@ -245,7 +245,7 @@ export default function MeetingRoom({ code }: { code: string }) {
     if (!session) return;
     setLeaveOpen(false);
     try {
-      await api.endForAll(code, session.participantId);
+      await api.endForAll(code);
       setPhase("left");
       router.push("/");
     } catch (e) {
@@ -256,7 +256,7 @@ export default function MeetingRoom({ code }: { code: string }) {
   async function muteAll() {
     if (!session) return;
     try {
-      const { muted } = await api.muteAll(code, session.participantId);
+      const { muted } = await api.muteAll(code);
       flash(muted ? `Muted ${muted} participant${muted > 1 ? "s" : ""}` : "Everyone is already muted");
     } catch (e) {
       flash(e instanceof ApiError ? e.message : "Couldn't mute everyone.");
@@ -266,7 +266,7 @@ export default function MeetingRoom({ code }: { code: string }) {
   async function remove(p: Participant) {
     if (!session || !confirm(`Remove ${p.display_name} from the meeting?`)) return;
     try {
-      await api.remove(code, p.id, session.participantId);
+      await api.remove(code, p.id);
       flash(`${p.display_name} was removed`);
     } catch (e) {
       flash(e instanceof ApiError ? e.message : "Couldn't remove that participant.");
@@ -275,7 +275,7 @@ export default function MeetingRoom({ code }: { code: string }) {
 
   async function sendMessage(text: string) {
     if (!session) return;
-    const m = await api.sendMessage(code, session.participantId, text);
+    const m = await api.sendMessage(code, text);
     lastMessageId.current = Math.max(lastMessageId.current, m.id);
     setMessages((prev) => (prev.some((x) => x.id === m.id) ? prev : [...prev, m]));
   }

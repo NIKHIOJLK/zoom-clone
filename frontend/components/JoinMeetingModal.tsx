@@ -31,10 +31,11 @@ export default function JoinMeetingModal({ user, onClose }: Props) {
     try {
       const meeting = await api.getMeeting(code); // validates the meeting exists
       if (meeting.status === "ended") throw new ApiError(410, "This meeting has ended.");
-      const p = await api.join(code, name.trim(), user?.id);
+      const p = await api.join(code, name.trim(), !!user);
       if (remember) rememberName(name.trim());
       saveSession(code, {
         participantId: p.id,
+        participantToken: p.participant_token,
         displayName: p.display_name,
         role: p.role,
         startMuted: noAudio,

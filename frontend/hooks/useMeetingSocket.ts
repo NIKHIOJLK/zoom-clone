@@ -19,7 +19,13 @@ export type ClientEvent = { type: "signal"; to: number; data: SignalData } | { t
  * One WebSocket per participant. Reconnects with backoff (1s, 2s, 4s… up to 10s) and
  * sends a ping every 25s so proxies don't close an idle connection.
  */
-export function useMeetingSocket(code: string, participantId: number | null, onEvent: (e: ServerEvent) => void) {
+export function useMeetingSocket(
+  code: string,
+  me: { participantId: number; participantToken: string } | null,
+  onEvent: (e: ServerEvent) => void,
+) {
+  const participantId = me?.participantId ?? null;
+  const token = me?.participantToken ?? "";
   const [connected, setConnected] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const handler = useRef(onEvent);
@@ -36,7 +42,8 @@ export function useMeetingSocket(code: string, participantId: number | null, onE
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
 
     const open = () => {
-      const ws = new WebSocket(`${WS_URL}/ws/meetings/${code}?participant_id=${participantId}`);
+      const url = `${WS_URL}/ws/meetings/${code}?participant_id=${participantId}&token=${encodeURIComponent(token)}`;
+      const ws = new WebSocket(url);
       wsRef.current = ws;
       ws.onopen = () => {
         attempt = 0;
@@ -53,7 +60,8 @@ export function useMeetingSocket(code: string, participantId: number | null, onE
         if (wsRef.current === ws) wsRef.current = null;
         setConnected(false);
         if (stopped) return;
-        if (e.code === 4404) return handler.current({ type: "rejected" });
+        // 4404: meeting over or I was removed; 4401: my participant token isn't valid
+        if (e.code === 4404 || e.code === 4401) return handler.current({ type: "rejected" });
         if (e.code === 4000) return; // replaced by a newer socket for the same participant
         retryTimer = setTimeout(open, Math.min(1000 * 2 ** attempt++, 10_000));
       };
@@ -71,7 +79,7 @@ export function useMeetingSocket(code: string, participantId: number | null, onE
       wsRef.current?.close();
       wsRef.current = null;
     };
-  }, [code, participantId]);
+  }, [code, participantId, token]);
 
   const send = useCallback((msg: ClientEvent) => {
     const ws = wsRef.current;

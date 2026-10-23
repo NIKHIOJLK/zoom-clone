@@ -4,6 +4,10 @@ from datetime import timedelta
 from sqlalchemy.orm import Session
 
 from .models import Meeting, Participant, User, utcnow
+from .security import hash_password
+
+# Seeded accounts can log in with this password (shown on the login page as the demo account).
+DEMO_PASSWORD = "demo1234"
 
 
 def seed(db: Session) -> None:
@@ -11,7 +15,7 @@ def seed(db: Session) -> None:
         return  # already seeded
 
     users = [
-        User(name="Nikhil Sharma", email="nikhil.sharma@example.com"),  # default logged-in user (id=1)
+        User(name="Nikhil Sharma", email="nikhil.sharma@example.com"),  # demo account (id=1)
         User(name="Riya Kapoor", email="riya.kapoor@example.com"),
         User(name="Aman Verma", email="aman.verma@example.com"),
         User(name="Sneha Iyer", email="sneha.iyer@example.com"),
@@ -65,4 +69,15 @@ def seed(db: Session) -> None:
                 role="participant", joined_at=start + timedelta(minutes=1), left_at=end,
             ))
 
+    db.commit()
+
+
+def set_demo_passwords(db: Session) -> None:
+    """Give seeded users (created before login existed) the demo password."""
+    users = db.query(User).filter(User.password_hash.is_(None)).all()
+    if not users:
+        return
+    hashed = hash_password(DEMO_PASSWORD)
+    for user in users:
+        user.password_hash = hashed
     db.commit()

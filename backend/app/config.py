@@ -21,3 +21,8 @@ CORS_ORIGINS = [
 
 # Absolute path, so the DB lands in backend/ no matter which folder the server starts from.
 DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{BACKEND_DIR / 'zoom.db'}")
+
+# Key that signs login and participant tokens (JWT). Use a long random value in production:
+#   python -c "import secrets; print(secrets.token_urlsafe(48))"
+JWT_SECRET = os.getenv("JWT_SECRET", "dev-only-secret-change-me-in-production-0123456789")
+JWT_EXPIRE_DAYS = int(os.getenv("JWT_EXPIRE_DAYS", "7"))

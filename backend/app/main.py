@@ -5,19 +5,21 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import CORS_ORIGINS
-from .database import Base, SessionLocal, engine
 from . import realtime
-from .routers import meetings, users
-from .seed import seed
+from .database import Base, SessionLocal, engine, upgrade_schema
+from .routers import auth, meetings, users
+from .seed import seed, set_demo_passwords
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # On startup: create tables if missing, then insert sample data once.
+    # On startup: create tables if missing, add new columns, then insert sample data once.
     Base.metadata.create_all(bind=engine)
+    upgrade_schema()
     db = SessionLocal()
     try:
         seed(db)
+        set_demo_passwords(db)
     finally:
         db.close()
     yield
@@ -33,6 +35,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(meetings.router)
 app.include_router(realtime.router)  # WebSocket: live events + WebRTC signaling

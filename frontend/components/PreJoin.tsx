@@ -42,13 +42,14 @@ export default function PreJoin({ code }: { code: string }) {
     setBusy(true);
     setJoinError(null);
     try {
-      // only pass the user id when joining under the account's own name,
+      // join as my account only under the account's own name,
       // so a second tab joining as "Guest" stays a normal participant
-      const asAccount = user && name.trim() === user.name ? user.id : undefined;
+      const asAccount = !!user && name.trim() === user.name;
       const p = await api.join(meeting.meeting_code, name.trim(), asAccount);
       if (remember) rememberName(name.trim());
       saveSession(meeting.meeting_code, {
         participantId: p.id,
+        participantToken: p.participant_token,
         displayName: p.display_name,
         role: p.role,
         startMuted: !media.micOn,
